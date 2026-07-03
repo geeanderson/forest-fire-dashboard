@@ -63,6 +63,7 @@ PRESETS = {
     "Last 24 h":    timedelta(hours=24),
     "Last 7 d":     timedelta(days=7),
     "Last 30 d":    timedelta(days=30),
+    "Last 90 d":    timedelta(days=90),
     "Last 365 d":   timedelta(days=365),
     "Custom":       None,
 }
