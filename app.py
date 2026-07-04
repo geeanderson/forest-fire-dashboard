@@ -369,7 +369,4 @@ st.download_button(
 # ---------------------------------------------------------------------------
 
 st.divider()
-st.caption(
-    "Forest Fire IoT Monitoring System · PPGI/UTFPR Cornélio Procópio · "
-    "Raimundo Geanderson Amador dos Santos · 2026"
-)
+st.caption("Forest Fire IoT Monitoring System")
