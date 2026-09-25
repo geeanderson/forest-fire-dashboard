@@ -301,10 +301,13 @@ with tab_hum:
     st.plotly_chart(fig, use_container_width=True)
 
 with tab_aq:
-    fig = px.line(df, x="timestamp", y="air_quality", color="Node",
-                  labels={"air_quality": "ADC raw", "timestamp": ""})
-    fig.update_layout(legend_title="Node")
-    st.plotly_chart(fig, use_container_width=True)
+    if "air_quality" in df.columns and df["air_quality"].notna().any():
+        fig = px.line(df, x="timestamp", y="air_quality", color="Node",
+                      labels={"air_quality": "ADC raw", "timestamp": ""})
+        fig.update_layout(legend_title="Node")
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("Air quality sensor (MQ-135) not yet deployed — no data to display.")
 
 with tab_risk:
     if "fire_risk" in df.columns:
