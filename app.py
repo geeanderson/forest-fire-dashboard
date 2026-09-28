@@ -22,28 +22,22 @@ DYNAMODB_TABLE = _secret("DYNAMODB_TABLE", "forest-fire-readings")
 
 NODES = [
     {
-        "id":      "node-01",
-        "label":   "Node 01 — Maringá",
-        "city":    "Maringá, PR",
-        "station": "INMET A835",
-        # Real field install location (Sagres, Portugal), updated 2026-09-26.
-        # "station"/city labels kept as-is - they identify the INMET training
-        # station this node's ML features are matched against, per the
-        # BR-train/PT-field split (see project-brasil-portugal-rationale).
-        "lat":     37.026837,
-        "lon":     -8.956227,
+        "id":         "node-01",
+        "label":      "Node 01 — Sagres, PT",
+        "city":       "Sagres, PT",
+        # ML training reference (BR-train/PT-field split, see project-brasil-portugal-rationale)
+        "ml_station": "INMET A835 (Maringá, PR)",
+        "lat":        37.026837,
+        "lon":        -8.956227,
     },
     {
-        "id":      "node-02",
-        "label":   "Node 02 — Dois Vizinhos",
-        "city":    "Dois Vizinhos, PR",
-        "station": "INMET A843",
-        # Real field install location (Sagres, Portugal), updated 2026-09-28.
-        # "station"/city labels kept as-is - they identify the INMET training
-        # station this node's ML features are matched against, per the
-        # BR-train/PT-field split (see project-brasil-portugal-rationale).
-        "lat":     37.051917,
-        "lon":     -8.959559,
+        "id":         "node-02",
+        "label":      "Node 02 — Sagres, PT",
+        "city":       "Sagres, PT",
+        # ML training reference (BR-train/PT-field split, see project-brasil-portugal-rationale)
+        "ml_station": "INMET A843 (Dois Vizinhos, PR)",
+        "lat":        37.051917,
+        "lon":        -8.959559,
     },
     # node-03 removido do dashboard: teste de campo atual usa apenas node-01/node-02
     # (node-03 desligado por colisão de rádio com node-02, ver project-colisao-lora-node02-node03)
@@ -211,9 +205,10 @@ for i, node in enumerate(NODES):
         # Node header with location
         st.markdown(f"### {node['label']}")
         st.markdown(
-            f"📍 **{node['city']}** · {node['station']}  \n"
+            f"📍 **{node['city']}**  \n"
             f"`{node['lat']:.5f}, {node['lon']:.5f}`"
         )
+        st.caption(f"ML training reference: {node['ml_station']}")
         st.link_button("🗺️ View on Google Maps", maps_url, use_container_width=True)
 
         if node_df.empty:
@@ -256,17 +251,17 @@ st.divider()
 with st.expander("🗺️ Node Locations Map", expanded=False):
     map_df = pd.DataFrame([
         {
-            "Node":    n["label"],
-            "City":    n["city"],
-            "Station": n["station"],
-            "lat":     n["lat"],
-            "lon":     n["lon"],
+            "Node":       n["label"],
+            "City":       n["city"],
+            "ML Station": n["ml_station"],
+            "lat":        n["lat"],
+            "lon":        n["lon"],
         }
         for n in NODES
     ])
     st.map(map_df, latitude="lat", longitude="lon", size=5000)
     st.dataframe(
-        map_df[["Node", "City", "Station", "lat", "lon"]],
+        map_df[["Node", "City", "ML Station", "lat", "lon"]],
         use_container_width=True,
         hide_index=True,
     )
