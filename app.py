@@ -26,25 +26,27 @@ NODES = [
         "label":   "Node 01 — Maringá",
         "city":    "Maringá, PR",
         "station": "INMET A835",
-        "lat":     -23.40527777,
-        "lon":     -51.93277777,
+        # Real field install location (Sagres, Portugal), updated 2026-09-26.
+        # "station"/city labels kept as-is - they identify the INMET training
+        # station this node's ML features are matched against, per the
+        # BR-train/PT-field split (see project-brasil-portugal-rationale).
+        "lat":     37.026837,
+        "lon":     -8.956227,
     },
     {
         "id":      "node-02",
         "label":   "Node 02 — Dois Vizinhos",
         "city":    "Dois Vizinhos, PR",
         "station": "INMET A843",
-        "lat":     -25.69916666,
-        "lon":     -53.09527777,
+        # Real field install location (Sagres, Portugal), updated 2026-09-28.
+        # "station"/city labels kept as-is - they identify the INMET training
+        # station this node's ML features are matched against, per the
+        # BR-train/PT-field split (see project-brasil-portugal-rationale).
+        "lat":     37.051917,
+        "lon":     -8.959559,
     },
-    {
-        "id":      "node-03",
-        "label":   "Node 03 — Ivaí",
-        "city":    "Ivaí, PR",
-        "station": "INMET A818",
-        "lat":     -25.01083333,
-        "lon":     -50.85388888,
-    },
+    # node-03 removido do dashboard: teste de campo atual usa apenas node-01/node-02
+    # (node-03 desligado por colisão de rádio com node-02, ver project-colisao-lora-node02-node03)
 ]
 
 NODE_IDS = [n["id"] for n in NODES]
