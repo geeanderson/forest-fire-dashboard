@@ -4,7 +4,9 @@ from datetime import datetime, timedelta, timezone
 import boto3
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
+from plotly.subplots import make_subplots
 from boto3.dynamodb.conditions import Key
 
 # ---------------------------------------------------------------------------
@@ -259,7 +261,7 @@ with st.expander("🗺️ Node Locations Map", expanded=False):
         }
         for n in NODES
     ])
-    st.map(map_df, latitude="lat", longitude="lon", size=5000)
+    st.map(map_df, latitude="lat", longitude="lon", size=40, zoom=12)
     st.dataframe(
         map_df[["Node", "City", "ML Station", "lat", "lon"]],
         use_container_width=True,
@@ -274,68 +276,97 @@ st.divider()
 
 st.subheader("Time Series")
 
-tab_temp, tab_hum, tab_aq, tab_risk, tab_prob = st.tabs([
-    "🌡️ Temperature",
-    "💧 Humidity",
-    "💨 Air Quality",
-    "🔥 Fire Risk (0–5)",
-    "📊 ML Probability",
-])
-
 NODE_LABELS = {n["id"]: n["label"] for n in NODES}
 df["Node"] = df["device_id"].map(NODE_LABELS)
 
-with tab_temp:
-    fig = px.line(df, x="timestamp", y="temperature", color="Node",
-                  labels={"temperature": "°C", "timestamp": ""})
-    fig.update_layout(legend_title="Node")
-    st.plotly_chart(fig, use_container_width=True)
+TEMP_COLOR = "#e65100"
+HUM_COLOR  = "#1565c0"
 
-with tab_hum:
-    fig = px.line(df, x="timestamp", y="humidity", color="Node",
-                  labels={"humidity": "%", "timestamp": ""})
-    fig.update_layout(legend_title="Node")
-    st.plotly_chart(fig, use_container_width=True)
 
-with tab_aq:
-    if "air_quality" in df.columns and df["air_quality"].notna().any():
-        fig = px.line(df, x="timestamp", y="air_quality", color="Node",
-                      labels={"air_quality": "ADC raw", "timestamp": ""})
-        fig.update_layout(legend_title="Node")
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("Air quality sensor (MQ-135) not yet deployed — no data to display.")
-
-with tab_risk:
-    if "fire_risk" in df.columns:
-        fig = px.line(df, x="timestamp", y="fire_risk", color="Node",
-                      labels={"fire_risk": "Level (0–5)", "timestamp": ""},
-                      range_y=[0, 5])
-        fig.add_hrect(y0=3, y1=5, fillcolor="red", opacity=0.08,
-                      line_width=0, annotation_text="High risk zone")
-        fig.update_layout(legend_title="Node")
-        st.plotly_chart(fig, use_container_width=True)
-        st.caption("Scale: 0=None · 1=Low · 2=Moderate · 3=High · 4=Very High · 5=Critical")
-    else:
-        st.info("Column fire_risk not found in data.")
-
-with tab_prob:
-    if "fire_probability" in df.columns:
-        fig = px.line(df, x="timestamp", y="fire_probability", color="Node",
-                      labels={"fire_probability": "Probability", "timestamp": ""},
-                      range_y=[0, 1])
-        fig.add_hrect(y0=0.5, y1=1.0, fillcolor="orange", opacity=0.06,
-                      line_width=0, annotation_text="P > 50%")
-        fig.add_hrect(y0=0.7, y1=1.0, fillcolor="red", opacity=0.06,
-                      line_width=0, annotation_text="P > 70%")
-        fig.update_layout(yaxis_tickformat=".0%", legend_title="Node")
-        st.plotly_chart(fig, use_container_width=True)
-        st.caption(
-            "Random Forest model · F1=0.748 · AUC=0.801 · "
-            "Features: temperature, humidity, days without rain"
+def temp_humidity_chart(node_df: pd.DataFrame, metrics: list[str]) -> go.Figure:
+    show_temp = "Temperature" in metrics
+    show_hum  = "Humidity" in metrics
+    both = show_temp and show_hum
+    fig = make_subplots(specs=[[{"secondary_y": both}]])
+    if show_temp:
+        fig.add_trace(
+            go.Scatter(x=node_df["timestamp"], y=node_df["temperature"],
+                       name="Temperature (°C)", mode="lines",
+                       line=dict(color=TEMP_COLOR)),
+            secondary_y=False,
         )
-    else:
-        st.info("Column fire_probability not found in data.")
+        fig.update_yaxes(title_text="Temperature (°C)", secondary_y=False,
+                         title_font_color=TEMP_COLOR)
+    if show_hum:
+        fig.add_trace(
+            go.Scatter(x=node_df["timestamp"], y=node_df["humidity"],
+                       name="Humidity (%)", mode="lines",
+                       line=dict(color=HUM_COLOR)),
+            secondary_y=both,
+        )
+        fig.update_yaxes(title_text="Humidity (%)", secondary_y=both,
+                         title_font_color=HUM_COLOR)
+    fig.update_layout(hovermode="x unified",
+                      legend=dict(orientation="h", y=1.1, x=0))
+    return fig
+
+
+for node in NODES:
+    node_df = df[df["device_id"] == node["id"]]
+    st.markdown(f"#### {node['label']}")
+
+    if node_df.empty:
+        st.info("No data in selected period.")
+        continue
+
+    tab_th, tab_risk, tab_prob = st.tabs([
+        "🌡️💧 Temperature & Humidity",
+        "🔥 Fire Risk (0–5)",
+        "📊 ML Probability",
+    ])
+
+    with tab_th:
+        metrics = st.multiselect(
+            "Metrics",
+            options=["Temperature", "Humidity"],
+            default=["Temperature", "Humidity"],
+            key=f"metrics_{node['id']}",
+        )
+        if metrics:
+            st.plotly_chart(temp_humidity_chart(node_df, metrics),
+                            use_container_width=True, key=f"th_{node['id']}")
+        else:
+            st.info("Select at least one metric.")
+
+    with tab_risk:
+        if "fire_risk" in node_df.columns:
+            fig = px.line(node_df, x="timestamp", y="fire_risk",
+                          labels={"fire_risk": "Level (0–5)", "timestamp": ""},
+                          range_y=[0, 5])
+            fig.add_hrect(y0=3, y1=5, fillcolor="red", opacity=0.08,
+                          line_width=0, annotation_text="High risk zone")
+            st.plotly_chart(fig, use_container_width=True, key=f"risk_{node['id']}")
+            st.caption("Scale: 0=None · 1=Low · 2=Moderate · 3=High · 4=Very High · 5=Critical")
+        else:
+            st.info("Column fire_risk not found in data.")
+
+    with tab_prob:
+        if "fire_probability" in node_df.columns:
+            fig = px.line(node_df, x="timestamp", y="fire_probability",
+                          labels={"fire_probability": "Probability", "timestamp": ""},
+                          range_y=[0, 1])
+            fig.add_hrect(y0=0.5, y1=1.0, fillcolor="orange", opacity=0.06,
+                          line_width=0, annotation_text="P > 50%")
+            fig.add_hrect(y0=0.7, y1=1.0, fillcolor="red", opacity=0.06,
+                          line_width=0, annotation_text="P > 70%")
+            fig.update_layout(yaxis_tickformat=".0%")
+            st.plotly_chart(fig, use_container_width=True, key=f"prob_{node['id']}")
+            st.caption(
+                "Random Forest model · F1=0.748 · AUC=0.801 · "
+                "Features: temperature, humidity, days without rain"
+            )
+        else:
+            st.info("Column fire_probability not found in data.")
 
 st.divider()
 
@@ -350,13 +381,21 @@ show_cols = [c for c in [
     "days_without_rain", "fire_risk", "fire_probability", "source", "battery_voltage",
 ] if c in df.columns]
 
+node_filter = st.multiselect(
+    "Node",
+    options=[n["label"] for n in NODES],
+    default=[n["label"] for n in NODES],
+    key="table_node_filter",
+)
+table_df = df[df["Node"].isin(node_filter)]
+
 st.dataframe(
-    df[show_cols].sort_values("timestamp", ascending=False),
+    table_df[show_cols].sort_values("timestamp", ascending=False),
     use_container_width=True,
     height=320,
 )
 
-csv_data = df[show_cols].to_csv(index=False).encode("utf-8")
+csv_data = table_df[show_cols].to_csv(index=False).encode("utf-8")
 st.download_button(
     "⬇️ Export CSV",
     data=csv_data,
