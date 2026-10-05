@@ -38,8 +38,8 @@ NODES = [
         "city":       "Sagres, PT",
         # ML training reference (BR-train/PT-field split, see project-brasil-portugal-rationale)
         "ml_station": "INMET A843 (Dois Vizinhos, PR)",
-        "lat":        37.051917,
-        "lon":        -8.959559,
+        "lat":        37.032314,
+        "lon":        -8.978725,
     },
     # node-03 removido do dashboard: teste de campo atual usa apenas node-01/node-02
     # (node-03 desligado por colisão de rádio com node-02, ver project-colisao-lora-node02-node03)
