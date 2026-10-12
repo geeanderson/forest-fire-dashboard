@@ -27,8 +27,8 @@ NODES = [
         "id":         "node-01",
         "label":      "Node 01 — Sagres, PT",
         "city":       "Sagres, PT",
-        # ML training reference (BR-train/PT-field split, see project-brasil-portugal-rationale)
-        "ml_station": "INMET A835 (Maringá, PR)",
+        # ML model in use (v1 Brazil until 2026-10-12, see PLANO_ML.md stage 5)
+        "ml_station": "v2 Portugal — IPMA × fogos.pt (since 2026-10-12)",
         "lat":        37.026837,
         "lon":        -8.956227,
     },
@@ -36,8 +36,8 @@ NODES = [
         "id":         "node-02",
         "label":      "Node 02 — Sagres, PT",
         "city":       "Sagres, PT",
-        # ML training reference (BR-train/PT-field split, see project-brasil-portugal-rationale)
-        "ml_station": "INMET A843 (Dois Vizinhos, PR)",
+        # ML model in use (v1 Brazil until 2026-10-12, see PLANO_ML.md stage 5)
+        "ml_station": "v2 Portugal — IPMA × fogos.pt (since 2026-10-12)",
         "lat":        37.032314,
         "lon":        -8.978725,
     },
@@ -47,12 +47,13 @@ NODES = [
 
 NODE_IDS = [n["id"] for n in NODES]
 
-RISK_LABELS = {
-    0: "None", 1: "Low", 2: "Moderate", 3: "High", 4: "Very High", 5: "Critical"
-}
-RISK_COLORS = {
-    0: "#2e7d32", 1: "#558b2f", 2: "#f9a825", 3: "#ef6c00", 4: "#c62828", 5: "#4a148c"
-}
+# v2 Portugal (decision 3, PLANO_ML.md): levels 1–5 over the calibrated probability, RCM-style names
+RISK_LABELS = {1: "Reduced", 2: "Moderate", 3: "High", 4: "Very High", 5: "Maximum"}
+RISK_COLORS = {1: "#2e7d32", 2: "#9e9d24", 3: "#f9a825", 4: "#ef6c00", 5: "#c62828"}
+RISK_RANGES = {1: "< 5%", 2: "5–10%", 3: "10–20%", 4: "20–40%", 5: "≥ 40%"}
+RISK_CUTS = [0.05, 0.10, 0.20, 0.40]
+# v1 Brazil (until 2026-10-12): levels 0–5 from the instantaneous reading
+V1_RISK_LABELS = {0: "None", 1: "Low", 2: "Moderate", 3: "High", 4: "Very High", 5: "Critical"}
 
 PRESETS = {
     "Last 15 min":  timedelta(minutes=15),
@@ -121,10 +122,14 @@ def load_readings(start: datetime, end: datetime) -> pd.DataFrame:
 
     df = pd.concat(frames, ignore_index=True)
     for col in ["temperature", "humidity", "air_quality", "fire_risk",
-                "fire_probability", "days_without_rain", "battery_voltage"]:
+                "fire_probability", "days_without_rain", "battery_voltage",
+                "temp_mean_24h", "humidity_mean_24h", "n_readings_24h"]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
     df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+    version = df["model_version"] if "model_version" in df.columns else pd.Series("", index=df.index)
+    df["model"] = version.fillna("").astype(str).map(
+        lambda v: "v2 Portugal (24 h)" if v.startswith("v2") else "v1 Brazil (legacy)")
     return df.sort_values("timestamp")
 
 # ---------------------------------------------------------------------------
@@ -210,7 +215,7 @@ for i, node in enumerate(NODES):
             f"📍 **{node['city']}**  \n"
             f"`{node['lat']:.5f}, {node['lon']:.5f}`"
         )
-        st.caption(f"ML training reference: {node['ml_station']}")
+        st.caption(f"ML model: {node['ml_station']}")
         st.link_button("🗺️ View on Google Maps", maps_url, use_container_width=True)
 
         if node_df.empty:
@@ -218,11 +223,26 @@ for i, node in enumerate(NODES):
             continue
 
         last = node_df.iloc[-1]
-        risk  = int(last.get("fire_risk", -1)) if pd.notna(last.get("fire_risk")) else -1
-        label = RISK_LABELS.get(risk, "N/A")
-        color = RISK_COLORS.get(risk, "#555")
+        is_v2 = last["model"].startswith("v2")
+        status = last.get("risk_status") if "risk_status" in node_df.columns else None
+        risk  = int(last["fire_risk"]) if pd.notna(last.get("fire_risk")) else None
         prob  = last.get("fire_probability")
         prob_str = f"{float(prob)*100:.1f}%" if pd.notna(prob) else "N/A"
+        if risk is not None and is_v2:
+            headline = f"Fire Risk (24 h): {RISK_LABELS.get(risk, 'N/A')} ({risk}/5)"
+            detail = (f"Probability: {prob_str} · 24 h mean: {last['temp_mean_24h']:.1f} °C / "
+                      f"{last['humidity_mean_24h']:.0f}%")
+            color = RISK_COLORS.get(risk, "#555")
+        elif risk is not None:
+            headline = f"Fire Risk (v1, legacy): {V1_RISK_LABELS.get(risk, 'N/A')} ({risk}/5)"
+            detail, color = f"ML Probability: {prob_str}", "#555"
+        elif status == "dados_insuficientes":
+            n = last.get("n_readings_24h")
+            headline = "Fire Risk: insufficient data"
+            detail = f"{int(n) if pd.notna(n) else 0}/48 valid readings in the last 24 h (minimum 36)"
+            color = "#757575"
+        else:
+            headline, detail, color = "Fire Risk: unavailable", "No model output for this reading", "#757575"
 
         st.caption(f"Last update: `{last['timestamp'].strftime('%Y-%m-%d %H:%M UTC')}`")
 
@@ -238,11 +258,12 @@ for i, node in enumerate(NODES):
         st.markdown(
             f"<div style='background:{color};padding:10px;border-radius:8px;"
             f"text-align:center;color:white;font-weight:bold;margin-top:8px;font-size:1.05rem'>"
-            f"Fire Risk: {label} ({risk}/5)"
+            f"{headline}"
             f"<br><span style='font-size:0.85rem;font-weight:normal'>"
-            f"ML Probability: {prob_str}</span></div>",
+            f"{detail}</span></div>",
             unsafe_allow_html=True,
         )
+        st.caption("Daily fire risk of the area (last 24 h), not of the instant reading · experimental")
 
 st.divider()
 
@@ -255,7 +276,7 @@ with st.expander("🗺️ Node Locations Map", expanded=False):
         {
             "Node":       n["label"],
             "City":       n["city"],
-            "ML Station": n["ml_station"],
+            "ML Model":   n["ml_station"],
             "lat":        n["lat"],
             "lon":        n["lon"],
         }
@@ -263,7 +284,7 @@ with st.expander("🗺️ Node Locations Map", expanded=False):
     ])
     st.map(map_df, latitude="lat", longitude="lon", size=40, zoom=12)
     st.dataframe(
-        map_df[["Node", "City", "ML Station", "lat", "lon"]],
+        map_df[["Node", "City", "ML Model", "lat", "lon"]],
         use_container_width=True,
         hide_index=True,
     )
@@ -321,7 +342,7 @@ for node in NODES:
 
     tab_th, tab_risk, tab_prob = st.tabs([
         "🌡️💧 Temperature & Humidity",
-        "🔥 Fire Risk (0–5)",
+        "🔥 Fire Risk (1–5)",
         "📊 ML Probability",
     ])
 
@@ -339,34 +360,36 @@ for node in NODES:
             st.info("Select at least one metric.")
 
     with tab_risk:
-        if "fire_risk" in node_df.columns:
-            fig = px.line(node_df, x="timestamp", y="fire_risk",
-                          labels={"fire_risk": "Level (0–5)", "timestamp": ""},
-                          range_y=[0, 5])
-            fig.add_hrect(y0=3, y1=5, fillcolor="red", opacity=0.08,
-                          line_width=0, annotation_text="High risk zone")
+        if "fire_risk" in node_df.columns and node_df["fire_risk"].notna().any():
+            fig = px.line(node_df, x="timestamp", y="fire_risk", color="model",
+                          labels={"fire_risk": "Level", "timestamp": "", "model": ""},
+                          range_y=[0, 5.3], line_shape="hv")
+            fig.add_hrect(y0=3.5, y1=5.3, fillcolor="red", opacity=0.08,
+                          line_width=0, annotation_text="Very High / Maximum")
+            fig.update_layout(legend=dict(orientation="h", y=1.12, x=0))
             st.plotly_chart(fig, use_container_width=True, key=f"risk_{node['id']}")
-            st.caption("Scale: 0=None · 1=Low · 2=Moderate · 3=High · 4=Very High · 5=Critical")
+            st.caption("v2 scale (probability of ≥1 rural fire within 10 km today): "
+                       + " · ".join(f"{k}={RISK_LABELS[k]} ({RISK_RANGES[k]})" for k in RISK_LABELS)
+                       + " — v1 legacy (until 2026-10-12): 0–5 from the instantaneous reading")
         else:
-            st.info("Column fire_risk not found in data.")
+            st.info("No fire risk in the selected period.")
 
     with tab_prob:
-        if "fire_probability" in node_df.columns:
-            fig = px.line(node_df, x="timestamp", y="fire_probability",
-                          labels={"fire_probability": "Probability", "timestamp": ""},
-                          range_y=[0, 1])
-            fig.add_hrect(y0=0.5, y1=1.0, fillcolor="orange", opacity=0.06,
-                          line_width=0, annotation_text="P > 50%")
-            fig.add_hrect(y0=0.7, y1=1.0, fillcolor="red", opacity=0.06,
-                          line_width=0, annotation_text="P > 70%")
-            fig.update_layout(yaxis_tickformat=".0%")
+        if "fire_probability" in node_df.columns and node_df["fire_probability"].notna().any():
+            fig = px.line(node_df, x="timestamp", y="fire_probability", color="model",
+                          labels={"fire_probability": "Probability", "timestamp": "", "model": ""})
+            for cut in RISK_CUTS:
+                fig.add_hline(y=cut, line_dash="dot", line_color="#999", annotation_text=f"{cut:.0%}")
+            fig.update_layout(yaxis_tickformat=".0%", legend=dict(orientation="h", y=1.12, x=0))
             st.plotly_chart(fig, use_container_width=True, key=f"prob_{node['id']}")
             st.caption(
-                "Random Forest model · F1=0.748 · AUC=0.801 · "
-                "Features: temperature, humidity, days without rain"
+                "v2 Portugal: Random Forest (IPMA × fogos.pt), calibrated probability of ≥1 rural fire "
+                "within 10 km today · test 2026: PR-AUC 0.58, ROC-AUC 0.85 · inputs: 24 h mean temperature "
+                "and humidity, days without rain, month, local fire history · dotted lines = level cuts. "
+                "v1 Brazil (legacy): instantaneous reading, not comparable."
             )
         else:
-            st.info("Column fire_probability not found in data.")
+            st.info("No ML probability in the selected period.")
 
 st.divider()
 
@@ -378,7 +401,8 @@ st.subheader("Readings Table")
 
 show_cols = [c for c in [
     "Node", "timestamp", "temperature", "humidity", "air_quality",
-    "days_without_rain", "fire_risk", "fire_probability", "source", "battery_voltage",
+    "days_without_rain", "temp_mean_24h", "humidity_mean_24h", "n_readings_24h", "risk_status",
+    "fire_risk", "fire_risk_label", "fire_probability", "model", "source", "battery_voltage",
 ] if c in df.columns]
 
 node_filter = st.multiselect(
